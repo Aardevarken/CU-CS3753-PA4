@@ -42,15 +42,32 @@
 #include <dirent.h>
 #include <errno.h>
 #include <sys/time.h>
+#include <stdlib.h>
+#include <linux/limits.h>
 #ifdef HAVE_SETXATTR
 #include <sys/xattr.h>
 #endif
 
+struct xmp_state 
+{
+	char *rootdir;
+};
+
+#define XMP_DATA ((struct xmp_state *) fuse_get_context()->private_data)
+
+static void xmp_fullpath(char fpath[PATH_MAX], const char *path)
+{
+	strcpy(fpath, XMP_DATA->rootdir);
+	strncat(fpath, path, PATH_MAX);
+}
+
 static int xmp_getattr(const char *path, struct stat *stbuf)
 {
 	int res;
+	char fpath[PATH_MAX];
+	xmp_fullpath(fpath, path);
 
-	res = lstat(path, stbuf);
+	res = lstat(fpath, stbuf);
 	if (res == -1)
 		return -errno;
 
@@ -410,6 +427,19 @@ static struct fuse_operations xmp_oper = {
 
 int main(int argc, char *argv[])
 {
-	umask(0);
+	struct xmp_state *xmp_data;
+	
+	xmp_data = malloc(sizeof(struct xmp_state));
+	    if (xmp_data == NULL) {
+			perror("main calloc");
+			abort();
+    }
+
+	xmp_data->rootdir = realpath(argv[argc-2], NULL);
+    argv[argc-2] = argv[argc-1];
+    argv[argc-1] = NULL;
+    argc--;
+
+    umask(0);
 	return fuse_main(argc, argv, &xmp_oper, NULL);
 }
