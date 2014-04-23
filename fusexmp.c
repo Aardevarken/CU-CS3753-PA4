@@ -334,21 +334,40 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 static int xmp_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
 {
-	int fd;
+	FILE *fp, *memfp;
 	int res;
+	char *memdata;
+	size_t memsize;
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 
 	(void) fi;
-	fd = open(fpath, O_WRONLY);
-	if (fd == -1)
+	fp = fopen(fpath, "r");
+	if (fp == NULL)
 		return -errno;
 
-	res = pwrite(fd, buf, size, offset);
+	memfp = open_memstream(&memdata, &memsize);
+	if (memfp == NULL)
+		return -errno;
+
+	do_crypt(fp, memfp, DECRYPT, XMP_DATA->passphrase);
+	fclose(fp);
+
+	fseek(memfp, offset, SEEK_SET);
+	res = fwrite(buf, 1, size, memfp);
 	if (res == -1)
 		res = -errno;
+	fflush(memfp);
 
-	close(fd);
+	fp = fopen(fpath, "w");
+	fseek(memfp, 0, SEEK_SET);
+	do_crypt(memfp, fp, ENCRYPT, XMP_DATA->passphrase);
+
+	fclose(memfp);
+	fclose(fp);
+
+
+
 	return res;
 }
 
