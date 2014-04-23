@@ -45,6 +45,7 @@
 #include <stdlib.h>
 #include <linux/limits.h>
 #include "params.h"
+#include "aes-crypt.h"
 #ifdef HAVE_SETXATTR
 #include <sys/xattr.h>
 #endif
@@ -388,7 +389,7 @@ static int xmp_fsync(const char *path, int isdatasync,
 	return 0;
 }
 
-void *xmp_init(struct fuse_conn_info *conn)
+void *xmp_init()
 {
     return XMP_DATA;
 }
@@ -397,7 +398,9 @@ void *xmp_init(struct fuse_conn_info *conn)
 static int xmp_setxattr(const char *path, const char *name, const char *value,
 			size_t size, int flags)
 {
-	int res = lsetxattr(path, name, value, size, flags);
+	char fpath[PATH_MAX];
+	xmp_fullpath(fpath, path);
+	int res = lsetxattr(fpath, name, value, size, flags);
 	if (res == -1)
 		return -errno;
 	return 0;
@@ -406,7 +409,9 @@ static int xmp_setxattr(const char *path, const char *name, const char *value,
 static int xmp_getxattr(const char *path, const char *name, char *value,
 			size_t size)
 {
-	int res = lgetxattr(path, name, value, size);
+	char fpath[PATH_MAX];
+	xmp_fullpath(fpath, path);
+	int res = lgetxattr(fpath, name, value, size);
 	if (res == -1)
 		return -errno;
 	return res;
@@ -414,7 +419,9 @@ static int xmp_getxattr(const char *path, const char *name, char *value,
 
 static int xmp_listxattr(const char *path, char *list, size_t size)
 {
-	int res = llistxattr(path, list, size);
+	char fpath[PATH_MAX];
+	xmp_fullpath(fpath, path);
+	int res = llistxattr(fpath, list, size);
 	if (res == -1)
 		return -errno;
 	return res;
@@ -422,7 +429,9 @@ static int xmp_listxattr(const char *path, char *list, size_t size)
 
 static int xmp_removexattr(const char *path, const char *name)
 {
-	int res = lremovexattr(path, name);
+	char fpath[PATH_MAX];
+	xmp_fullpath(fpath, path);
+	int res = lremovexattr(fpath, name);
 	if (res == -1)
 		return -errno;
 	return 0;
@@ -461,9 +470,24 @@ static struct fuse_operations xmp_oper = {
 #endif
 };
 
+void xmp_usage()
+{
+    fprintf(stderr, "usage: ./pa4-encfs [FUSE and mount options] passphrase rootDir mountPoint\n");
+    exit(1);
+}
+
 int main(int argc, char *argv[])
 {
 	struct xmp_state *xmp_data;
+
+	// Perform some sanity checking on the command line:  make sure
+    // there are enough arguments, and that neither of the last two
+    // start with a hyphen (this will break if you actually have a
+    // rootpoint or mountpoint whose name starts with a hyphen, but so
+    // will a zillion other programs)
+    if ((argc < 4) || (argv[argc-2][0] == '-') || (argv[argc-1][0] == '-')) {
+		xmp_usage();
+	}
 	
 	xmp_data = malloc(sizeof(struct xmp_state));
 	    if (xmp_data == NULL) {
@@ -472,9 +496,11 @@ int main(int argc, char *argv[])
     }
 
 	xmp_data->rootdir = realpath(argv[argc-2], NULL);
-    argv[argc-2] = argv[argc-1];
+	xmp_data->passphrase = argv[argc-3];
+    argv[argc-3] = argv[argc-1];
+    argv[argc-2] = NULL;
     argv[argc-1] = NULL;
-    argc--;
+    argc -= 2;
 
     umask(0);
 	return fuse_main(argc, argv, &xmp_oper, xmp_data);

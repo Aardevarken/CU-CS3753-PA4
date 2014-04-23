@@ -33,7 +33,7 @@ fusehello: fusehello.o
 	$(CC) $(LFLAGS) $^ -o $@ $(LLIBSFUSE)
 
 fusexmp: fusexmp.o
-	$(CC) $(LFLAGS) $^ -o $@ $(LLIBSFUSE)
+	$(CC) $(LFLAGS) $^ -o $@ $(LLIBSFUSE) $(LLIBSOPENSSL)
 
 xattr-util: xattr-util.o
 	$(CC) $(LFLAGS) $^ -o $@
