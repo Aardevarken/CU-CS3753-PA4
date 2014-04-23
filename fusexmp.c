@@ -32,6 +32,8 @@
 #ifdef linux
 /* For pread()/pwrite() */
 #define _XOPEN_SOURCE 500
+/* For open_memstream() */
+#define _POSIX_C_SOURCE 200809L
 #endif
 
 #include <fuse.h>
@@ -42,7 +44,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <sys/time.h>
-#include <stdlib.h>
+#include <stdlib.h> 	
 #include <linux/limits.h>
 #include "params.h"
 #include "aes-crypt.h"
@@ -301,17 +303,14 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	FILE *fp, *memfp;
 	char *memdata;
 	size_t memsize;
-	int fd;
 	int res;
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 
 	(void) fi;
-	fd = open(fpath, O_RDONLY);
-	if (fd == -1)
+	fp = fopen(fpath, "r");
+	if (fp == NULL)
 		return -errno;
-
-	fp = fdopen(fd, "w");
 
 	memfp = open_memstream(&memdata, &memsize);
 	if (memfp == NULL)
@@ -322,15 +321,13 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 
 	fflush(memfp);
 	fseek(memfp, offset, SEEK_SET);
-	
-	res = pread(fd, buf, size, offset);
+
+	res = fread(buf, 1, size, memfp);
 	if (res == -1)
 		res = -errno;
 
-	fp = fdopen(res, "w");
-	
-	fclose(fp);
-	close(fd);
+	fclose(memfp);
+
 	return res;
 }
 
