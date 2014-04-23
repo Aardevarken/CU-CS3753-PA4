@@ -298,6 +298,9 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
+	FILE *fp, *memfp;
+	char *memdata;
+	size_t memsize;
 	int fd;
 	int res;
 	char fpath[PATH_MAX];
@@ -308,10 +311,25 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	if (fd == -1)
 		return -errno;
 
+	fp = fdopen(fd, "w");
+
+	memfp = open_memstream(&memdata, &memsize);
+	if (memfp == NULL)
+		return -errno;
+
+	do_crypt(fp, memfp, DECRYPT, XMP_DATA->passphrase);
+	fclose(fp);
+
+	fflush(memfp);
+	fseek(memfp, offset, SEEK_SET);
+	
 	res = pread(fd, buf, size, offset);
 	if (res == -1)
 		res = -errno;
 
+	fp = fdopen(res, "w");
+	
+	fclose(fp);
 	close(fd);
 	return res;
 }
@@ -350,18 +368,26 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 	return 0;
 }
 
-static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) {
-
+static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) 
+{
     (void) fi;
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
+	FILE *fp;
 
     int res;
     res = creat(fpath, mode);
     if(res == -1)
 	return -errno;
+	
+	fp = fdopen(res, "w");
+	close(res);
+	
+	do_crypt(fp, fp, ENCRYPT, XMP_DATA->passphrase);
 
-    close(res);
+	fclose(fp);
+    
+
 
     return 0;
 }

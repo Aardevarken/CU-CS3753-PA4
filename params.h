@@ -1,6 +1,9 @@
 #ifndef _PARAMS_H_
 #define _PARAMS_H_
 
+#define ENCRYPT 1
+#define DECRYPT 0
+#define PASS -1
 
 // maintain xmpfs state in here
 #include <limits.h>

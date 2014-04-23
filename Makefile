@@ -32,7 +32,7 @@ openssl-examples: $(OPENSSL_EXAMPLES)
 fusehello: fusehello.o
 	$(CC) $(LFLAGS) $^ -o $@ $(LLIBSFUSE)
 
-fusexmp: fusexmp.o
+fusexmp: fusexmp.o aes-crypt.o
 	$(CC) $(LFLAGS) $^ -o $@ $(LLIBSFUSE) $(LLIBSOPENSSL)
 
 xattr-util: xattr-util.o
