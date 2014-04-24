@@ -24,6 +24,7 @@
 
 #define FUSE_USE_VERSION 28
 #define HAVE_SETXATTR
+static const char ENCATTRNAME[] = "user.pa4-encfs.encrypted";
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -34,6 +35,8 @@
 #define _XOPEN_SOURCE 500
 /* For open_memstream() */
 #define _POSIX_C_SOURCE 200809L
+/* Linux is missing ENOATTR error, using ENODATA instead */
+#define ENOATTR ENODATA
 #endif
 
 #include <fuse.h>
@@ -297,16 +300,129 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
+int norm_read(const char *path, char *buf, size_t size, off_t offset)
+{
+	int fd;
+	int res;
+
+	fd = open(path, O_RDONLY);
+	if (fd == -1)
+		return -errno;
+
+	res = pread(fd, buf, size, offset);
+	if (res == -1)
+		res = -errno;
+
+	close(fd);
+	return res;
+}
+
+int is_encrypted(const char *path){
+	ssize_t valsize;
+	char *tmpval;
+	valsize = getxattr(path, ENCATTRNAME, NULL, 0);
+	if(valsize < 0){
+	    if(errno == ENOATTR){
+		fprintf(stderr, "No %s attribute set on %s\n", ENCATTRNAME, path);
+		return 0;
+	    }
+	    else{
+		perror("getxattr error");
+		fprintf(stderr, "path  = %s\n", path);
+		fprintf(stderr, "name  = %s\n", ENCATTRNAME);
+		fprintf(stderr, "value = %s\n", "NULL");
+		fprintf(stderr, "size  = %zd\n", valsize);
+		return -errno;
+	    }
+	}
+	/* Malloc Value Space */
+	tmpval = malloc(sizeof(*tmpval)*(valsize+1));
+	if(!tmpval){
+	    perror("malloc of 'tmpval' error");
+	    return -errno;
+	}
+	/* Get attribute value */
+	valsize = getxattr(path, ENCATTRNAME, tmpval, valsize);
+	if(valsize < 0){
+	    if(errno == ENOATTR){
+		fprintf(stdout, "No %s attribute set on %s\n", ENCATTRNAME, path);
+		return 0;
+	    }
+	    else{
+		perror("getxattr error");
+		fprintf(stderr, "path  = %s\n", path);
+		fprintf(stderr, "name  = %s\n", ENCATTRNAME);
+		fprintf(stderr, "value = %s\n", tmpval);
+		fprintf(stderr, "size  = %zd\n", valsize);
+		return -errno;
+	    }
+	}
+
+	tmpval[valsize] = '\0';
+	fprintf(stderr, "%s = %s\n\n", ENCATTRNAME, tmpval);
+
+	if(!strcmp(tmpval, "true")){
+		return 1;
+	}
+	else
+		return 0;
+}
+
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
 	FILE *fp, *memfp;
 	char *memdata;
 	size_t memsize;
+	// ssize_t valsize;
 	int res;
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
+	// char *tmpval;
 
+	// valsize = getxattr(fpath, ENCATTRNAME, NULL, 0);
+	// if(valsize < 0){
+	//     if(errno == ENOATTR){
+	// 	fprintf(stderr, "No %s attribute set on %s\n", ENCATTRNAME, fpath);
+	// 	return norm_read(fpath, buf, size, offset);
+	//     }
+	//     else{
+	// 	perror("getxattr error");
+	// 	fprintf(stderr, "path  = %s\n", fpath);
+	// 	fprintf(stderr, "name  = %s\n", ENCATTRNAME);
+	// 	fprintf(stderr, "value = %s\n", "NULL");
+	// 	fprintf(stderr, "size  = %zd\n", valsize);
+	// 	return -errno;
+	//     }
+	// }
+	// /* Malloc Value Space */
+	// tmpval = malloc(sizeof(*tmpval)*(valsize+1));
+	// if(!tmpval){
+	//     perror("malloc of 'tmpval' error");
+	//     return -errno;
+	// }
+	// /* Get attribute value */
+	// valsize = getxattr(fpath, ENCATTRNAME, tmpval, valsize);
+	// if(valsize < 0){
+	//     if(errno == ENOATTR){
+	// 	fprintf(stdout, "No %s attribute set on %s\n", ENCATTRNAME, fpath);
+	// 	return norm_read(fpath, buf, size, offset);
+	//     }
+	//     else{
+	// 	perror("getxattr error");
+	// 	fprintf(stderr, "path  = %s\n", fpath);
+	// 	fprintf(stderr, "name  = %s\n", ENCATTRNAME);
+	// 	fprintf(stderr, "value = %s\n", tmpval);
+	// 	fprintf(stderr, "size  = %zd\n", valsize);
+	// 	return -errno;
+	//     }
+	// }
+
+	// tmpval[valsize] = '\0';
+	// fprintf(stderr, "%s = %s\n\n", ENCATTRNAME, tmpval);
+
+	// if(!strcmp(tmpval, "true")){
+	if(is_encrypted(fpath)){
 	(void) fi;
 	fp = fopen(fpath, "r");
 	if (fp == NULL)
@@ -327,6 +443,25 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		res = -errno;
 
 	fclose(memfp);
+	}
+	else{
+	int fd;
+
+	fd = open(fpath, O_RDONLY);
+	if (fd == -1)
+		return -errno;
+
+	res = pread(fd, buf, size, offset);
+	if (res == -1)
+		res = -errno;
+
+	close(fd);
+	}
+	// }
+	// else{
+	// 	res = norm_read(fpath, buf, size, offset);
+	// }
+
 
 	return res;
 }
@@ -366,8 +501,6 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	fclose(memfp);
 	fclose(fp);
 
-
-
 	return res;
 }
 
@@ -390,8 +523,9 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi)
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 	FILE *fp;
-
     int res;
+    int attr;
+
     res = creat(fpath, mode);
     if(res == -1)
 	return -errno;
@@ -403,7 +537,10 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi)
 
 	fclose(fp);
     
-
+	/* set file attribute */
+	attr = setxattr(fpath, ENCATTRNAME, "true", 4, 0);
+	if(attr == -1)
+		return -errno;
 
     return 0;
 }
