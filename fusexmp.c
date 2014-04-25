@@ -498,6 +498,12 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 	res = statvfs(fpath, stbuf);
 	if (res == -1)
 		return -errno;
+	if(S_ISREG(stbuf->st_mode)){
+		if(is_encrypted(fpath)){
+			unecrsize = xmp_encgetsize(fpath);
+			stbuf->st_size = unecrsize;
+		}
+	}
 
 	return 0;
 }
