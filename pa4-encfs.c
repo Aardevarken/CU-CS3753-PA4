@@ -10,7 +10,7 @@
   This program can be distributed under the terms of the GNU GPL.
   See the file COPYING.
 
-  gcc -Wall `pkg-config fuse --cflags` fusexmp.c -o fusexmp `pkg-config fuse --libs`
+  gcc -Wall `pkg-config fuse --cflags` fuseencfs.c -o fuseencfs `pkg-config fuse --libs`
 
   Note: This implementation is largely stateless and does not maintain
         open file handels between open and release calls (fi->fh).
@@ -60,7 +60,7 @@ static const char ENCATTRNAME[] = "user.pa4-encfs.encrypted";
 
 /* given a file path, will return a 0 if unencrypted, and 1 if encrypted.
    This code has been lightly modified from that which appears in xattr-util.c */
-static int xmp_isencrypted(const char *path){
+static int encfs_isencrypted(const char *path){
 	ssize_t valsize;
 	char *tmpval;
 
@@ -115,15 +115,15 @@ static int xmp_isencrypted(const char *path){
 }
 
 /* replaces the root path with the full path for mirroring the specified directory */
-static void xmp_fullpath(char fpath[PATH_MAX], const char *path)
+static void encfs_fullpath(char fpath[PATH_MAX], const char *path)
 {
-	strcpy(fpath, XMP_DATA->rootdir);
+	strcpy(fpath, ENCFS_DATA->rootdir);
 	strncat(fpath, path, PATH_MAX);
 }
 
 /* gets the size of an encrypted file, which will appear different
    if the size is determined before the file has been unecrypted */
-static long xmp_encgetsize(char *path){
+static long encfs_encgetsize(char *path){
 	FILE *fp, *tmpfp;
 	long size;
 
@@ -132,12 +132,12 @@ static long xmp_encgetsize(char *path){
 			return -errno;
 
 	/* double check that the path is for an encrypted file */
-	if(xmp_isencrypted(path)){
+	if(encfs_isencrypted(path)){
 		/* create temp file and encrypt into it. */
 		tmpfp = tmpfile();
 		if (tmpfp == NULL)
 			return -errno;
-		do_crypt(fp, tmpfp, DECRYPT, XMP_DATA->passphrase);
+		do_crypt(fp, tmpfp, DECRYPT, ENCFS_DATA->passphrase);
 		/* go back to the beginning of the file then get the size */
 		fseek(tmpfp, 0, SEEK_END);
 		size = ftell(tmpfp);
@@ -151,11 +151,11 @@ static long xmp_encgetsize(char *path){
 	return size;
 }
 
-static int xmp_getattr(const char *path, struct stat *stbuf)
+static int encfs_getattr(const char *path, struct stat *stbuf)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 	long unecrsize;
 
 	res = lstat(fpath, stbuf);
@@ -165,8 +165,8 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 	since size(unecrypted) != size(encrypted), which is important
 	for some text editors */
 	if(S_ISREG(stbuf->st_mode)){
-		if(xmp_isencrypted(fpath)){
-			unecrsize = xmp_encgetsize(fpath);
+		if(encfs_isencrypted(fpath)){
+			unecrsize = encfs_encgetsize(fpath);
 			stbuf->st_size = unecrsize;
 		}
 	}
@@ -174,11 +174,11 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 	return 0;
 }
 
-static int xmp_access(const char *path, int mask)
+static int encfs_access(const char *path, int mask)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	res = access(fpath, mask);
 	if (res == -1)
@@ -187,11 +187,11 @@ static int xmp_access(const char *path, int mask)
 	return 0;
 }
 
-static int xmp_readlink(const char *path, char *buf, size_t size)
+static int encfs_readlink(const char *path, char *buf, size_t size)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	res = readlink(fpath, buf, size - 1);
 	if (res == -1)
@@ -202,13 +202,13 @@ static int xmp_readlink(const char *path, char *buf, size_t size)
 }
 
 
-static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+static int encfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		       off_t offset, struct fuse_file_info *fi)
 {
 	DIR *dp;
 	struct dirent *de;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	(void) offset;
 	(void) fi;
@@ -230,11 +230,11 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	return 0;
 }
 
-static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
+static int encfs_mknod(const char *path, mode_t mode, dev_t rdev)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	/* On Linux this could just be 'mknod(path, mode, rdev)' but this
 	   is more portable */
@@ -252,11 +252,11 @@ static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
 	return 0;
 }
 
-static int xmp_mkdir(const char *path, mode_t mode)
+static int encfs_mkdir(const char *path, mode_t mode)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	res = mkdir(fpath, mode);
 	if (res == -1)
@@ -265,11 +265,11 @@ static int xmp_mkdir(const char *path, mode_t mode)
 	return 0;
 }
 
-static int xmp_unlink(const char *path)
+static int encfs_unlink(const char *path)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	res = unlink(fpath);
 	if (res == -1)
@@ -278,11 +278,11 @@ static int xmp_unlink(const char *path)
 	return 0;
 }
 
-static int xmp_rmdir(const char *path)
+static int encfs_rmdir(const char *path)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	res = rmdir(fpath);
 	if (res == -1)
@@ -291,7 +291,7 @@ static int xmp_rmdir(const char *path)
 	return 0;
 }
 
-static int xmp_symlink(const char *from, const char *to)
+static int encfs_symlink(const char *from, const char *to)
 {
 	int res;
 
@@ -302,7 +302,7 @@ static int xmp_symlink(const char *from, const char *to)
 	return 0;
 }
 
-static int xmp_rename(const char *from, const char *to)
+static int encfs_rename(const char *from, const char *to)
 {
 	int res;
 
@@ -313,7 +313,7 @@ static int xmp_rename(const char *from, const char *to)
 	return 0;
 }
 
-static int xmp_link(const char *from, const char *to)
+static int encfs_link(const char *from, const char *to)
 {
 	int res;
 
@@ -324,11 +324,11 @@ static int xmp_link(const char *from, const char *to)
 	return 0;
 }
 
-static int xmp_chmod(const char *path, mode_t mode)
+static int encfs_chmod(const char *path, mode_t mode)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	res = chmod(fpath, mode);
 	if (res == -1)
@@ -337,11 +337,11 @@ static int xmp_chmod(const char *path, mode_t mode)
 	return 0;
 }
 
-static int xmp_chown(const char *path, uid_t uid, gid_t gid)
+static int encfs_chown(const char *path, uid_t uid, gid_t gid)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	res = lchown(fpath, uid, gid);
 	if (res == -1)
@@ -350,15 +350,15 @@ static int xmp_chown(const char *path, uid_t uid, gid_t gid)
 	return 0;
 }
 
-static int xmp_truncate(const char *path, off_t size)
+static int encfs_truncate(const char *path, off_t size)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	/* if encrypted, get the correct size */
-	if(xmp_isencrypted(fpath)){
-		size = xmp_encgetsize(fpath);
+	if(encfs_isencrypted(fpath)){
+		size = encfs_encgetsize(fpath);
 	}
 
 	res = truncate(fpath, size);
@@ -368,12 +368,12 @@ static int xmp_truncate(const char *path, off_t size)
 	return 0;
 }
 
-static int xmp_utimens(const char *path, const struct timespec ts[2])
+static int encfs_utimens(const char *path, const struct timespec ts[2])
 {
 	int res;
 	struct timeval tv[2];
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	tv[0].tv_sec = ts[0].tv_sec;
 	tv[0].tv_usec = ts[0].tv_nsec / 1000;
@@ -387,11 +387,11 @@ static int xmp_utimens(const char *path, const struct timespec ts[2])
 	return 0;
 }
 
-static int xmp_open(const char *path, struct fuse_file_info *fi)
+static int encfs_open(const char *path, struct fuse_file_info *fi)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	res = open(fpath, fi->flags);
 	if (res == -1)
@@ -401,20 +401,18 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
+static int encfs_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
-	FILE *fp, *memfp, *tmpfp;
-	char *memdata;
-	size_t memsize;
+	FILE *fp, *tmpfp;
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	(void) fi;
 
 	/* if the file is encrypted, we need to decrypt before reading */
-	if(xmp_isencrypted(fpath)){
+	if(encfs_isencrypted(fpath)){
 
 		fp = fopen(fpath, "r");
 		if (fp == NULL)
@@ -424,7 +422,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		if (tmpfp == NULL)
 			return -errno;
 		/* decrypt the file into the tempfile */
-		do_crypt(fp, tmpfp, DECRYPT, XMP_DATA->passphrase);
+		do_crypt(fp, tmpfp, DECRYPT, ENCFS_DATA->passphrase);
 		fclose(fp);
 		/*seek to the position we want to read, then read */
 		fseek(tmpfp, offset, SEEK_SET);
@@ -450,18 +448,18 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	return res;
 }
 
-static int xmp_write(const char *path, const char *buf, size_t size,
+static int encfs_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
 {
 	FILE *fp, *tmpfp;
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	(void) fi;
 
 	/* if the file is encrypted, then we'll have to unencrypt, write, then decrypt.*/
-	if(xmp_isencrypted(fpath)){
+	if(encfs_isencrypted(fpath)){
 
 		fp = fopen(fpath, "r");
 		if (fp == NULL)
@@ -471,7 +469,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 		if (tmpfp == NULL)
 			return -errno;
 		/* encrypt the file into the temp file */
-		do_crypt(fp, tmpfp, DECRYPT, XMP_DATA->passphrase);
+		do_crypt(fp, tmpfp, DECRYPT, ENCFS_DATA->passphrase);
 		fclose(fp);
 
 		/*seek to the position we need to write at then write */
@@ -483,13 +481,13 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 		fp = fopen(fpath, "w");
 		/* go to beginning of temp file and then encrypt */
 		fseek(tmpfp, 0, SEEK_SET);
-		do_crypt(tmpfp, fp, ENCRYPT, XMP_DATA->passphrase);
+		do_crypt(tmpfp, fp, ENCRYPT, ENCFS_DATA->passphrase);
 
 		fclose(tmpfp);
 		fclose(fp);
 	}
 
-	/*if it is not encrypted, we just use the logic from fusexmp.c */
+	/*if it is not encrypted, we just use the logic from fuseencfs.c */
 	else{
 		int fd;
 
@@ -507,11 +505,11 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	return res;
 }
 
-static int xmp_statfs(const char *path, struct statvfs *stbuf)
+static int encfs_statfs(const char *path, struct statvfs *stbuf)
 {
 	int res;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	res = statvfs(fpath, stbuf);
 	if (res == -1)
@@ -520,11 +518,11 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 	return 0;
 }
 
-static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) 
+static int encfs_create(const char* path, mode_t mode, struct fuse_file_info* fi) 
 {
     (void) fi;
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 	FILE *fp;
     int res;
     int attr;
@@ -536,7 +534,7 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi)
 	fp = fdopen(res, "w");
 	close(res);
 	
-	do_crypt(fp, fp, ENCRYPT, XMP_DATA->passphrase);
+	do_crypt(fp, fp, ENCRYPT, ENCFS_DATA->passphrase);
 
 	fclose(fp);
     
@@ -549,7 +547,7 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi)
 }
 
 
-static int xmp_release(const char *path, struct fuse_file_info *fi)
+static int encfs_release(const char *path, struct fuse_file_info *fi)
 {
 	/* Just a stub.	 This method is optional and can safely be left
 	   unimplemented */
@@ -559,7 +557,7 @@ static int xmp_release(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-static int xmp_fsync(const char *path, int isdatasync,
+static int encfs_fsync(const char *path, int isdatasync,
 		     struct fuse_file_info *fi)
 {
 	/* Just a stub.	 This method is optional and can safely be left
@@ -571,28 +569,28 @@ static int xmp_fsync(const char *path, int isdatasync,
 	return 0;
 }
 
-void *xmp_init()
+void *encfs_init()
 {
-    return XMP_DATA;
+    return ENCFS_DATA;
 }
 
 #ifdef HAVE_SETXATTR
-static int xmp_setxattr(const char *path, const char *name, const char *value,
+static int encfs_setxattr(const char *path, const char *name, const char *value,
 			size_t size, int flags)
 {
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 	int res = lsetxattr(fpath, name, value, size, flags);
 	if (res == -1)
 		return -errno;
 	return 0;
 }
 
-static int xmp_getxattr(const char *path, const char *name, char *value,
+static int encfs_getxattr(const char *path, const char *name, char *value,
 			size_t size)
 {
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 
 	int res = lgetxattr(fpath, name, value, size);
 	if (res == -1)
@@ -600,20 +598,20 @@ static int xmp_getxattr(const char *path, const char *name, char *value,
 	return res;
 }
 
-static int xmp_listxattr(const char *path, char *list, size_t size)
+static int encfs_listxattr(const char *path, char *list, size_t size)
 {
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 	int res = llistxattr(fpath, list, size);
 	if (res == -1)
 		return -errno;
 	return res;
 }
 
-static int xmp_removexattr(const char *path, const char *name)
+static int encfs_removexattr(const char *path, const char *name)
 {
 	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	encfs_fullpath(fpath, path);
 	int res = lremovexattr(fpath, name);
 	if (res == -1)
 		return -errno;
@@ -621,39 +619,39 @@ static int xmp_removexattr(const char *path, const char *name)
 }
 #endif /* HAVE_SETXATTR */
 
-static struct fuse_operations xmp_oper = {
-	.getattr	= xmp_getattr,
-	.access		= xmp_access,
-	.readlink	= xmp_readlink,
-	.readdir	= xmp_readdir,
-	.mknod		= xmp_mknod,
-	.mkdir		= xmp_mkdir,
-	.symlink	= xmp_symlink,
-	.unlink		= xmp_unlink,
-	.rmdir		= xmp_rmdir,
-	.rename		= xmp_rename,
-	.link		= xmp_link,
-	.chmod		= xmp_chmod,
-	.chown		= xmp_chown,
-	.truncate	= xmp_truncate,
-	.utimens	= xmp_utimens,
-	.open		= xmp_open,
-	.read		= xmp_read,
-	.write		= xmp_write,
-	.statfs		= xmp_statfs,
-	.create         = xmp_create,
-	.release	= xmp_release,
-	.fsync		= xmp_fsync,
-	.init       = xmp_init,
+static struct fuse_operations encfs_oper = {
+	.getattr	= encfs_getattr,
+	.access		= encfs_access,
+	.readlink	= encfs_readlink,
+	.readdir	= encfs_readdir,
+	.mknod		= encfs_mknod,
+	.mkdir		= encfs_mkdir,
+	.symlink	= encfs_symlink,
+	.unlink		= encfs_unlink,
+	.rmdir		= encfs_rmdir,
+	.rename		= encfs_rename,
+	.link		= encfs_link,
+	.chmod		= encfs_chmod,
+	.chown		= encfs_chown,
+	.truncate	= encfs_truncate,
+	.utimens	= encfs_utimens,
+	.open		= encfs_open,
+	.read		= encfs_read,
+	.write		= encfs_write,
+	.statfs		= encfs_statfs,
+	.create         = encfs_create,
+	.release	= encfs_release,
+	.fsync		= encfs_fsync,
+	.init       = encfs_init,
 #ifdef HAVE_SETXATTR
-	.setxattr	= xmp_setxattr,
-	.getxattr	= xmp_getxattr,
-	.listxattr	= xmp_listxattr,
-	.removexattr	= xmp_removexattr,
+	.setxattr	= encfs_setxattr,
+	.getxattr	= encfs_getxattr,
+	.listxattr	= encfs_listxattr,
+	.removexattr	= encfs_removexattr,
 #endif
 };
 
-void xmp_usage()
+void encfs_usage()
 {
     fprintf(stderr, "usage: ./pa4-encfs [FUSE and mount options] passphrase rootDir mountPoint\n");
     exit(1);
@@ -661,7 +659,7 @@ void xmp_usage()
 
 int main(int argc, char *argv[])
 {
-	struct xmp_state *xmp_data;
+	struct encfs_state *encfs_data;
 
 	// Perform some sanity checking on the command line:  make sure
     // there are enough arguments, and that neither of the last two
@@ -669,22 +667,22 @@ int main(int argc, char *argv[])
     // rootpoint or mountpoint whose name starts with a hyphen, but so
     // will a zillion other programs)
     if ((argc < 4) || (argv[argc-2][0] == '-') || (argv[argc-1][0] == '-')) {
-		xmp_usage();
+		encfs_usage();
 	}
 	
-	xmp_data = malloc(sizeof(struct xmp_state));
-	    if (xmp_data == NULL) {
+	encfs_data = malloc(sizeof(struct encfs_state));
+	    if (encfs_data == NULL) {
 			perror("main calloc");
 			abort();
     }
 
-	xmp_data->rootdir = realpath(argv[argc-2], NULL);
-	xmp_data->passphrase = argv[argc-3];
+	encfs_data->rootdir = realpath(argv[argc-2], NULL);
+	encfs_data->passphrase = argv[argc-3];
     argv[argc-3] = argv[argc-1];
     argv[argc-2] = NULL;
     argv[argc-1] = NULL;
     argc -= 2;
 
     umask(0);
-	return fuse_main(argc, argv, &xmp_oper, xmp_data);
+	return fuse_main(argc, argv, &encfs_oper, encfs_data);
 }

@@ -5,14 +5,14 @@
 #define DECRYPT 0
 #define PASS -1
 
-// maintain xmpfs state in here
+// maintain encfs state in here
 #include <limits.h>
 #include <stdio.h>
-struct xmp_state 
+struct encfs_state 
 {
 	char *rootdir;
 	char *passphrase;
 };
-#define XMP_DATA ((struct xmp_state *) fuse_get_context()->private_data)
+#define ENCFS_DATA ((struct encfs_state *) fuse_get_context()->private_data)
 
 #endif
