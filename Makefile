@@ -17,19 +17,24 @@ LLIBSOPENSSL = -lcrypto
 CFLAGS = -c -g -Wall -Wextra
 LFLAGS = -g -Wall -Wextra
 
-FUSE_EXAMPLES = fusehello pa4-encfs 
+FUSE_EXAMPLES = fusehello fusexmp 
 XATTR_EXAMPLES = xattr-util
 OPENSSL_EXAMPLES = aes-crypt-util 
+ENCRYPTED_FS = pa4-encfs
 
 .PHONY: all fuse-examples xattr-examples openssl-examples clean
 
-all: fuse-examples xattr-examples openssl-examples
+all: fuse-examples xattr-examples openssl-examples encrypted-fs
 
 fuse-examples: $(FUSE_EXAMPLES)
 xattr-examples: $(XATTR_EXAMPLES)
 openssl-examples: $(OPENSSL_EXAMPLES)
+encrypted-fs: $(ENCRYPTED_FS)
 
 fusehello: fusehello.o
+	$(CC) $(LFLAGS) $^ -o $@ $(LLIBSFUSE)
+
+fusexmp: fusexmp.o
 	$(CC) $(LFLAGS) $^ -o $@ $(LLIBSFUSE)
 
 pa4-encfs: pa4-encfs.o aes-crypt.o
@@ -42,6 +47,9 @@ aes-crypt-util: aes-crypt-util.o aes-crypt.o
 	$(CC) $(LFLAGS) $^ -o $@ $(LLIBSOPENSSL)
 
 fusehello.o: fusehello.c
+	$(CC) $(CFLAGS) $(CFLAGSFUSE) $<
+
+fusexmp.o: fusexmp.c
 	$(CC) $(CFLAGS) $(CFLAGSFUSE) $<
 
 pa4-encfs.o: pa4-encfs.c
@@ -60,6 +68,7 @@ clean:
 	rm -f $(FUSE_EXAMPLES)
 	rm -f $(XATTR_EXAMPLES)
 	rm -f $(OPENSSL_EXAMPLES)
+	rm -f $(ENCRYPTED_FS)
 	rm -f *.o
 	rm -f *~
 	rm -f handout/*~
