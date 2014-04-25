@@ -17,7 +17,7 @@ LLIBSOPENSSL = -lcrypto
 CFLAGS = -c -g -Wall -Wextra
 LFLAGS = -g -Wall -Wextra
 
-FUSE_EXAMPLES = fusehello fusexmp 
+FUSE_EXAMPLES = fusehello pa4-encfs 
 XATTR_EXAMPLES = xattr-util
 OPENSSL_EXAMPLES = aes-crypt-util 
 
@@ -32,7 +32,7 @@ openssl-examples: $(OPENSSL_EXAMPLES)
 fusehello: fusehello.o
 	$(CC) $(LFLAGS) $^ -o $@ $(LLIBSFUSE)
 
-fusexmp: fusexmp.o aes-crypt.o
+pa4-encfs: pa4-encfs.o aes-crypt.o
 	$(CC) $(LFLAGS) $^ -o $@ $(LLIBSFUSE) $(LLIBSOPENSSL)
 
 xattr-util: xattr-util.o
@@ -44,7 +44,7 @@ aes-crypt-util: aes-crypt-util.o aes-crypt.o
 fusehello.o: fusehello.c
 	$(CC) $(CFLAGS) $(CFLAGSFUSE) $<
 
-fusexmp.o: fusexmp.c
+pa4-encfs.o: pa4-encfs.c
 	$(CC) $(CFLAGS) $(CFLAGSFUSE) $<
 
 xattr-util.o: xattr-util.c
