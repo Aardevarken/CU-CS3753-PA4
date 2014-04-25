@@ -57,10 +57,13 @@ static const char ENCATTRNAME[] = "user.pa4-encfs.encrypted";
 
 
 
-
-static int is_encrypted(const char *path){
+/* given a file path, will return a 0 if unencrypted, and 1 if encrypted.
+   This code has been lightly modified from that which appears in xattr-util.c */
+static int xmp_isencrypted(const char *path){
 	ssize_t valsize;
 	char *tmpval;
+
+	/* get the size of the value */
 	valsize = getxattr(path, ENCATTRNAME, NULL, 0);
 	if(valsize < 0){
 	    if(errno == ENOATTR){
@@ -99,9 +102,10 @@ static int is_encrypted(const char *path){
 	    }
 	}
 
+	/* truncate to value size */
 	tmpval[valsize] = '\0';
-	fprintf(stderr, "%s = %s\n\n", ENCATTRNAME, tmpval);
 
+	/* if value is "true", it is encrypted. Otherwise, consider it unencrypted */
 	if(!strcmp(tmpval, "true")){
 		return 1;
 	}
@@ -120,12 +124,12 @@ static long xmp_encgetsize(char *path){
 	long size;
 
 	fp = fopen(path, "r");
+	if (fp == NULL)
+			return -errno;
 
-	if(is_encrypted(path)){
+	if(xmp_isencrypted(path)){
 		tmpfp = tmpfile();
 		if (tmpfp == NULL)
-			return -errno;
-		if (fp == NULL)
 			return -errno;
 		do_crypt(fp, tmpfp, DECRYPT, XMP_DATA->passphrase);
 		fseek(tmpfp, 0, SEEK_END);
@@ -154,7 +158,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 	since size(unecrypted) != size(encrypted), which is important
 	for some text editors */
 	if(S_ISREG(stbuf->st_mode)){
-		if(is_encrypted(fpath)){
+		if(xmp_isencrypted(fpath)){
 			unecrsize = xmp_encgetsize(fpath);
 			stbuf->st_size = unecrsize;
 		}
@@ -345,6 +349,11 @@ static int xmp_truncate(const char *path, off_t size)
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 
+	/* if encrypted, get the correct size */
+	if(xmp_isencrypted(fpath)){
+		size = xmp_encgetsize(fpath);
+	}
+
 	res = truncate(fpath, size);
 	if (res == -1)
 		return -errno;
@@ -388,48 +397,47 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
-	FILE *fp, *memfp;
+	FILE *fp, *memfp, *tmpfp;
 	char *memdata;
 	size_t memsize;
 	int res;
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 
-
-	if(is_encrypted(fpath)){
 	(void) fi;
-	fp = fopen(fpath, "r");
-	if (fp == NULL)
-		return -errno;
 
-	memfp = open_memstream(&memdata, &memsize);
-	if (memfp == NULL)
-		return -errno;
+	/* if the file is encrypted, we need to decrypt before reading */
+	if(xmp_isencrypted(fpath)){
 
-	do_crypt(fp, memfp, DECRYPT, XMP_DATA->passphrase);
-	fclose(fp);
-
-	fflush(memfp);
-	fseek(memfp, offset, SEEK_SET);
-
-	res = fread(buf, 1, size, memfp);
-	if (res == -1)
-		res = -errno;
-
-	fclose(memfp);
+		fp = fopen(fpath, "r");
+		if (fp == NULL)
+			return -errno;
+		/*create the temp file to decrypt into */
+		tmpfp = tmpfile();
+		if (tmpfp == NULL)
+			return -errno;
+		/* decrypt the file into the tempfile */
+		do_crypt(fp, tmpfp, DECRYPT, XMP_DATA->passphrase);
+		fclose(fp);
+		/*seek to the position we want to read, then read */
+		fseek(tmpfp, offset, SEEK_SET);
+		res = fread(buf, 1, size, tmpfp);
+		if (res == -1)
+			res = -errno;
+		fclose(tmpfp);
 	}
 	else{
-	int fd;
+		int fd;
 
-	fd = open(fpath, O_RDONLY);
-	if (fd == -1)
-		return -errno;
+		fd = open(fpath, O_RDONLY);
+		if (fd == -1)
+			return -errno;
 
-	res = pread(fd, buf, size, offset);
-	if (res == -1)
-		res = -errno;
+		res = pread(fd, buf, size, offset);
+		if (res == -1)
+			res = -errno;
 
-	close(fd);
+		close(fd);
 	}
 
 	return res;
@@ -438,52 +446,55 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 static int xmp_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
 {
-	FILE *fp, *memfp;
+	FILE *fp, *tmpfp;
 	int res;
-	char *memdata;
-	size_t memsize;
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 
 	(void) fi;
 
-	if(is_encrypted(fpath)){
-	fp = fopen(fpath, "r");
-	if (fp == NULL)
-		return -errno;
+	/* if the file is encrypted, then we'll have to unencrypt, write, then decrypt.*/
+	if(xmp_isencrypted(fpath)){
 
-	memfp = open_memstream(&memdata, &memsize);
-	if (memfp == NULL)
-		return -errno;
+		fp = fopen(fpath, "r");
+		if (fp == NULL)
+			return -errno;
+		/* create and open a temp file */
+		tmpfp = tmpfile();
+		if (tmpfp == NULL)
+			return -errno;
+		/* encrypt the file into the temp file */
+		do_crypt(fp, tmpfp, DECRYPT, XMP_DATA->passphrase);
+		fclose(fp);
 
-	do_crypt(fp, memfp, DECRYPT, XMP_DATA->passphrase);
-	fclose(fp);
+		/*seek to the position we need to write at then write */
+		fseek(tmpfp, offset, SEEK_SET);
+		res = fwrite(buf, 1, size, tmpfp);
+		if (res == -1)
+			res = -errno;
+		/* open the original file to write encrypted data */
+		fp = fopen(fpath, "w");
+		/* go to beginning of temp file and then encrypt */
+		fseek(tmpfp, 0, SEEK_SET);
+		do_crypt(tmpfp, fp, ENCRYPT, XMP_DATA->passphrase);
 
-	fseek(memfp, offset, SEEK_SET);
-	res = fwrite(buf, 1, size, memfp);
-	if (res == -1)
-		res = -errno;
-	fflush(memfp);
-
-	fp = fopen(fpath, "w");
-	fseek(memfp, 0, SEEK_SET);
-	do_crypt(memfp, fp, ENCRYPT, XMP_DATA->passphrase);
-
-	fclose(memfp);
-	fclose(fp);
+		fclose(tmpfp);
+		fclose(fp);
 	}
+
+	/*if it is not encrypted, we just use the logic from fusexmp.c */
 	else{
-	int fd;
+		int fd;
 
-	fd = open(fpath, O_WRONLY);
-	if (fd == -1)
-		return -errno;
+		fd = open(fpath, O_WRONLY);
+		if (fd == -1)
+			return -errno;
 
-	res = pwrite(fd, buf, size, offset);
-	if (res == -1)
-		res = -errno;
+		res = pwrite(fd, buf, size, offset);
+		if (res == -1)
+			res = -errno;
 
-	close(fd);
+		close(fd);
 	}
 
 	return res;
@@ -498,12 +509,6 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 	res = statvfs(fpath, stbuf);
 	if (res == -1)
 		return -errno;
-	if(S_ISREG(stbuf->st_mode)){
-		if(is_encrypted(fpath)){
-			unecrsize = xmp_encgetsize(fpath);
-			stbuf->st_size = unecrsize;
-		}
-	}
 
 	return 0;
 }
@@ -581,10 +586,6 @@ static int xmp_getxattr(const char *path, const char *name, char *value,
 {
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
-
-	if(is_encrypted(fpath)){
-		size = xmp_encgetsize(fpath);
-	}
 
 	int res = lgetxattr(fpath, name, value, size);
 	if (res == -1)
