@@ -3,6 +3,7 @@
   Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
 
   Minor modifications and note by Andy Sayler (2012) <www.andysayler.com>
+  Further modified to create an encrypted file system by Morgan Garske 04/25/2014
 
   Source: fuse-2.8.7.tar.gz examples directory
   http://sourceforge.net/projects/fuse/files/fuse-2.X/
@@ -654,6 +655,7 @@ static struct fuse_operations encfs_oper = {
 void encfs_usage()
 {
     fprintf(stderr, "usage: ./pa4-encfs [FUSE and mount options] passphrase rootDir mountPoint\n");
+    fprintf(stderr, "passphrase cannot start with a hyphen (-)\n");
     exit(1);
 }
 
@@ -665,8 +667,9 @@ int main(int argc, char *argv[])
     // there are enough arguments, and that neither of the last two
     // start with a hyphen (this will break if you actually have a
     // rootpoint or mountpoint whose name starts with a hyphen, but so
-    // will a zillion other programs)
-    if ((argc < 4) || (argv[argc-2][0] == '-') || (argv[argc-1][0] == '-')) {
+    // will a zillion other programs) Will also not allow a passphrase
+    // with a hyphen before.
+    if ((argc < 4) || (argv[argc-2][0] == '-') || (argv[argc-1][0] == '-') || (argv[argc-3][0] == '-')) {
 		encfs_usage();
 	}
 	
