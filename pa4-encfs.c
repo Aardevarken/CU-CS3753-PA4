@@ -469,7 +469,7 @@ static int encfs_write(const char *path, const char *buf, size_t size,
 		tmpfp = tmpfile();
 		if (tmpfp == NULL)
 			return -errno;
-		/* encrypt the file into the temp file */
+		/* decrypt the file into the temp file */
 		do_crypt(fp, tmpfp, DECRYPT, ENCFS_DATA->passphrase);
 		fclose(fp);
 
